@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crossroad Simulation</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        h1 {
+            font-size: 1.6rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: #e0e0e0;
+        }
+
+        .subtitle {
+            font-size: 0.85rem;
+            color: #888;
+            margin-bottom: 16px;
+        }
+
+        #canvas-container {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+
+        canvas {
+            display: block;
+            background: #2d5a27;
+        }
+
+        .controls {
+            margin-top: 16px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        button {
+            background: #4361ee;
+            color: white;
+            border: none;
+            padding: 10px 28px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover { background: #3a56d4; }
+        button:disabled { background: #555; cursor: not-allowed; }
+
+        .status {
+            font-size: 0.85rem;
+            color: #aaa;
+            min-width: 200px;
+        }
+
+        .info-bar {
+            margin-top: 12px;
+            display: flex;
+            gap: 24px;
+            font-size: 0.8rem;
+            color: #777;
+        }
+
+        .info-bar span { display: flex; align-items: center; gap: 4px; }
+
+        .legend {
+            margin-top: 16px;
+            display: flex;
+            gap: 20px;
+            font-size: 0.78rem;
+            color: #999;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-swatch {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Crossroad Traffic Simulation</h1>
+    <p class="subtitle">Discrete event simulation powered by salabim &middot; Web animation with Canvas</p>
+
+    <div id="canvas-container">
+        <canvas id="sim" width="800" height="600"></canvas>
+    </div>
+
+    <div class="controls">
+        <button id="startBtn">Start Simulation</button>
+        <span class="status" id="status">Ready</span>
+    </div>
+
+    <div class="info-bar">
+        <span>Time: <strong id="simTime">0.0</strong>s</span>
+        <span>Cars on screen: <strong id="carCount">0</strong></span>
+        <span>Frames: <strong id="frameCount">0</strong></span>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-swatch" style="background:#3b82f6"></div> North-bound
+        </div>
+        <div class="legend-item">
+            <div class="legend-swatch" style="background:#ef4444"></div> South-bound
+        </div>
+        <div class="legend-item">
+            <div class="legend-swatch" style="background:#f59e0b"></div> East-bound
+        </div>
+        <div class="legend-item">
+            <div class="legend-swatch" style="background:#10b981"></div> West-bound
+        </div>
+    </div>
+
+    <script>
+    const canvas = document.getElementById('sim');
+    const ctx = canvas.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const statusEl = document.getElementById('status');
+    const simTimeEl = document.getElementById('simTime');
+    const carCountEl = document.getElementById('carCount');
+    const frameCountEl = document.getElementById('frameCount');
+
+    const W = canvas.width;
+    const H = canvas.height;
+    const CX = 400;
+    const CY = 300;
+    const ROAD_W = 60;  // total road width
+    const HALF = ROAD_W / 2;
+
+    const CAR_COLORS = {
+        north: '#3b82f6',
+        south: '#ef4444',
+        east:  '#f59e0b',
+        west:  '#10b981',
+    };
+
+    const LIGHT_COLORS = { green: '#22c55e', yellow: '#eab308', red: '#ef4444' };
+
+    let currentFrame = null;
+    let frameNumber = 0;
+
+    // -----------------------------------------------------------------------
+    // Drawing
+    // -----------------------------------------------------------------------
+
+    function drawRoads() {
+        // Grass background
+        ctx.fillStyle = '#2d5a27';
+        ctx.fillRect(0, 0, W, H);
+
+        // Vertical road
+        ctx.fillStyle = '#444';
+        ctx.fillRect(CX - HALF, 0, ROAD_W, H);
+
+        // Horizontal road
+        ctx.fillStyle = '#444';
+        ctx.fillRect(0, CY - HALF, W, ROAD_W);
+
+        // Intersection square (slightly lighter)
+        ctx.fillStyle = '#555';
+        ctx.fillRect(CX - HALF, CY - HALF, ROAD_W, ROAD_W);
+
+        // Road center lines (dashed)
+        ctx.setLineDash([10, 10]);
+        ctx.strokeStyle = '#888';
+        ctx.lineWidth = 1;
+
+        // Vertical center line
+        ctx.beginPath();
+        ctx.moveTo(CX, 0);
+        ctx.lineTo(CX, CY - HALF);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(CX, CY + HALF);
+        ctx.lineTo(CX, H);
+        ctx.stroke();
+
+        // Horizontal center line
+        ctx.beginPath();
+        ctx.moveTo(0, CY);
+        ctx.lineTo(CX - HALF, CY);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(CX + HALF, CY);
+        ctx.lineTo(W, CY);
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+
+        // Stop lines
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+
+        // North stop line (cars coming from top, stopping above intersection)
+        const SL = 80; // stop line offset from center
+        ctx.beginPath();
+        ctx.moveTo(CX, CY + SL);
+        ctx.lineTo(CX + HALF, CY + SL);
+        ctx.stroke();
+
+        // South stop line
+        ctx.beginPath();
+        ctx.moveTo(CX - HALF, CY - SL);
+        ctx.lineTo(CX, CY - SL);
+        ctx.stroke();
+
+        // East stop line
+        ctx.beginPath();
+        ctx.moveTo(CX + SL, CY - HALF);
+        ctx.lineTo(CX + SL, CY);
+        ctx.stroke();
+
+        // West stop line
+        ctx.beginPath();
+        ctx.moveTo(CX - SL, CY);
+        ctx.lineTo(CX - SL, CY + HALF);
+        ctx.stroke();
+    }
+
+    function drawTrafficLights(lights) {
+        if (!lights) return;
+
+        const lightR = 8;
+        const positions = {
+            ns: [
+                { x: CX + HALF + 16, y: CY + 90 },   // north-side indicator
+                { x: CX - HALF - 16, y: CY - 90 },   // south-side indicator
+            ],
+            ew: [
+                { x: CX + 90, y: CY - HALF - 16 },   // east-side indicator
+                { x: CX - 90, y: CY + HALF + 16 },   // west-side indicator
+            ],
+        };
+
+        for (const light of lights) {
+            const color = LIGHT_COLORS[light.color] || '#666';
+            const spots = positions[light.direction] || [];
+            for (const pos of spots) {
+                // Housing
+                ctx.fillStyle = '#222';
+                ctx.beginPath();
+                ctx.roundRect(pos.x - 12, pos.y - 12, 24, 24, 4);
+                ctx.fill();
+
+                // Light
+                ctx.fillStyle = color;
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 12;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, lightR, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+        }
+    }
+
+    function drawCars(cars) {
+        if (!cars) return;
+
+        for (const car of cars) {
+            const color = CAR_COLORS[car.direction] || '#fff';
+            const w = 16;
+            const h = 22;
+
+            ctx.save();
+            ctx.translate(car.x, car.y);
+
+            // Rotate based on direction
+            if (car.direction === 'east') ctx.rotate(-Math.PI / 2);
+            else if (car.direction === 'west') ctx.rotate(Math.PI / 2);
+            else if (car.direction === 'south') ctx.rotate(Math.PI);
+
+            // Car body
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(-w/2, -h/2, w, h, 3);
+            ctx.fill();
+
+            // Windshield
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.fillRect(-w/2 + 2, -h/2 + 2, w - 4, 6);
+
+            // Brake lights when waiting
+            if (car.waiting) {
+                ctx.fillStyle = '#ff0000';
+                ctx.shadowColor = '#ff0000';
+                ctx.shadowBlur = 6;
+                ctx.fillRect(-w/2, h/2 - 3, 4, 3);
+                ctx.fillRect(w/2 - 4, h/2 - 3, 4, 3);
+                ctx.shadowBlur = 0;
+            }
+
+            ctx.restore();
+        }
+    }
+
+    function drawFrame(frame) {
+        drawRoads();
+        drawTrafficLights(frame.lights);
+        drawCars(frame.cars);
+    }
+
+    // Initial draw
+    drawRoads();
+
+    // -----------------------------------------------------------------------
+    // WebSocket connection
+    // -----------------------------------------------------------------------
+
+    startBtn.addEventListener('click', () => {
+        startBtn.disabled = true;
+        statusEl.textContent = 'Running simulation...';
+        frameNumber = 0;
+
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+
+        ws.onopen = () => {
+            ws.send('start');
+            statusEl.textContent = 'Simulation running on server...';
+        };
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+
+            if (msg.type === 'init') {
+                statusEl.textContent = `Streaming ${msg.total_frames} frames...`;
+            } else if (msg.type === 'frame') {
+                currentFrame = msg.data;
+                frameNumber++;
+                drawFrame(currentFrame);
+                simTimeEl.textContent = currentFrame.time.toFixed(1);
+                carCountEl.textContent = currentFrame.cars.length;
+                frameCountEl.textContent = frameNumber;
+            } else if (msg.type === 'done') {
+                statusEl.textContent = 'Simulation complete!';
+                startBtn.disabled = false;
+                startBtn.textContent = 'Restart';
+            }
+        };
+
+        ws.onerror = () => {
+            statusEl.textContent = 'Connection error';
+            startBtn.disabled = false;
+        };
+
+        ws.onclose = () => {
+            if (statusEl.textContent.includes('Streaming')) {
+                statusEl.textContent = 'Connection closed';
+                startBtn.disabled = false;
+            }
+        };
+    });
+    </script>
+</body>
+</html>

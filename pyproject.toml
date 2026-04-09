@@ -1,7 +1,13 @@
 [project]
 name = "test-sim"
 version = "0.1.0"
-description = "Add your description here"
+description = "Demo: Web-based animation of a salabim crossroad simulation"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "salabim",
+    "greenlet",
+    "fastapi",
+    "uvicorn[standard]",
+    "websockets",
+]
