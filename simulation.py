@@ -158,15 +158,22 @@ class Car(sim.Component):
             self.y = ROAD_CENTER_Y + ROAD_HALF_WIDTH // 2
 
     def _stop_line_reached(self) -> bool:
-        """Check if car has reached the stop line."""
+        """Check if car has reached its queue position at the stop line."""
+        # Get current queue position BEFORE entering the queue
+        q = self.queues[self.direction]
+        pos = len(q)  # position this car will have when it joins
+        
+        target_y = self._stop_y_for_queue_pos(pos) if self.direction in ("north", "south") else None
+        target_x = self._stop_x_for_queue_pos(pos) if self.direction in ("east", "west") else None
+        
         if self.direction == "north":
-            return self.y <= ROAD_CENTER_Y + STOP_LINE_OFFSET
+            return self.y <= target_y
         elif self.direction == "south":
-            return self.y >= ROAD_CENTER_Y - STOP_LINE_OFFSET
+            return self.y >= target_y
         elif self.direction == "east":
-            return self.x <= ROAD_CENTER_X + STOP_LINE_OFFSET
+            return self.x <= target_x
         elif self.direction == "west":
-            return self.x >= ROAD_CENTER_X - STOP_LINE_OFFSET
+            return self.x >= target_x
         return False
 
     def _is_off_screen(self) -> bool:
@@ -195,50 +202,95 @@ class Car(sim.Component):
             return ROAD_CENTER_X - STOP_LINE_OFFSET - pos * CAR_SPACING
         return self.x
 
+    def _car_ahead_too_close(self) -> bool:
+        """Check if a car ahead in the same lane is within CAR_SPACING."""
+        for other in self.car_set:
+            if other is self or other.direction != self.direction:
+                continue
+            if self.direction == "north":
+                gap = self.y - other.y
+                if 0 < gap < CAR_SPACING and abs(other.x - self.x) < ROAD_HALF_WIDTH:
+                    return True
+            elif self.direction == "south":
+                gap = other.y - self.y
+                if 0 < gap < CAR_SPACING and abs(other.x - self.x) < ROAD_HALF_WIDTH:
+                    return True
+            elif self.direction == "east":
+                gap = self.x - other.x
+                if 0 < gap < CAR_SPACING and abs(other.y - self.y) < ROAD_HALF_WIDTH:
+                    return True
+            elif self.direction == "west":
+                gap = other.x - self.x
+                if 0 < gap < CAR_SPACING and abs(other.y - self.y) < ROAD_HALF_WIDTH:
+                    return True
+        return False
+
+    def _step_forward(self):
+        """Move one step in the car's direction."""
+        if self.direction == "north":
+            self.y -= CAR_SPEED
+        elif self.direction == "south":
+            self.y += CAR_SPEED
+        elif self.direction == "east":
+            self.x -= CAR_SPEED
+        elif self.direction == "west":
+            self.x += CAR_SPEED
+
     def process(self):
         q = self.queues[self.direction]
 
-        # Phase 1: Drive toward stop line
+        # Phase 1: Drive toward queue tail position
         while not self._stop_line_reached():
-            if self.direction == "north":
-                self.y -= CAR_SPEED
-            elif self.direction == "south":
-                self.y += CAR_SPEED
-            elif self.direction == "east":
-                self.x -= CAR_SPEED
-            elif self.direction == "west":
-                self.x += CAR_SPEED
+            self._step_forward()
             self.hold(FRAME_INTERVAL)
 
-        # Phase 2: Enter queue and wait for green
+        # Snap to exact queue position on arrival
+        pos = len(q)
+        if self.direction in ("north", "south"):
+            self.y = self._stop_y_for_queue_pos(pos)
+        else:
+            self.x = self._stop_x_for_queue_pos(pos)
+
+        # Phase 2: Wait in queue, slide forward as cars ahead depart
         self.enter(q)
         self.waiting = True
 
         while True:
             pos = self._queue_position()
-            # Snap to queue position
-            if self.direction in ("north", "south"):
-                self.y = self._stop_y_for_queue_pos(pos)
-            else:
-                self.x = self._stop_x_for_queue_pos(pos)
 
-            if pos == 0 and self.controller.is_green(self.direction):
+            # Slide toward our target queue position
+            if self.direction in ("north", "south"):
+                target = self._stop_y_for_queue_pos(pos)
+                if abs(self.y - target) > CAR_SPEED:
+                    self.y += CAR_SPEED if target > self.y else -CAR_SPEED
+                else:
+                    self.y = target
+            else:
+                target = self._stop_x_for_queue_pos(pos)
+                if abs(self.x - target) > CAR_SPEED:
+                    self.x += CAR_SPEED if target > self.x else -CAR_SPEED
+                else:
+                    self.x = target
+
+            # Only depart when at pos 0, physically at stop line, and green
+            at_stop = False
+            if self.direction in ("north", "south"):
+                at_stop = abs(self.y - self._stop_y_for_queue_pos(0)) < CAR_SPEED
+            else:
+                at_stop = abs(self.x - self._stop_x_for_queue_pos(0)) < CAR_SPEED
+
+            if pos == 0 and at_stop and self.controller.is_green(self.direction):
                 break
+
             self.hold(FRAME_INTERVAL)
 
         self.leave(q)
         self.waiting = False
 
-        # Phase 3: Drive through and out
+        # Phase 3: Drive through and out, respecting car ahead
         while not self._is_off_screen():
-            if self.direction == "north":
-                self.y -= CAR_SPEED
-            elif self.direction == "south":
-                self.y += CAR_SPEED
-            elif self.direction == "east":
-                self.x -= CAR_SPEED
-            elif self.direction == "west":
-                self.x += CAR_SPEED
+            if not self._car_ahead_too_close():
+                self._step_forward()
             self.hold(FRAME_INTERVAL)
 
         # Cleanup
