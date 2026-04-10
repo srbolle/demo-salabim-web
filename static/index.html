@@ -331,12 +331,33 @@
     // WebSocket connection
     // -----------------------------------------------------------------------
 
+    let activeWs = null;
+
+    function stopSimulation() {
+        if (activeWs) {
+            activeWs.close();
+            activeWs = null;
+        }
+        startBtn.textContent = 'Start Simulation';
+        startBtn.style.background = '';
+        statusEl.textContent = 'Stopped';
+    }
+
     startBtn.addEventListener('click', () => {
-        startBtn.disabled = true;
+        // If running, stop it
+        if (activeWs) {
+            stopSimulation();
+            return;
+        }
+
+        // Start new simulation
+        startBtn.textContent = 'Stop Simulation';
+        startBtn.style.background = '#dc2626';
         statusEl.textContent = 'Running simulation...';
         frameNumber = 0;
 
         const ws = new WebSocket(`ws://${location.host}/ws`);
+        activeWs = ws;
 
         ws.onopen = () => {
             ws.send('start');
@@ -356,21 +377,26 @@
                 carCountEl.textContent = currentFrame.cars.length;
                 frameCountEl.textContent = frameNumber;
             } else if (msg.type === 'done') {
+                activeWs = null;
                 statusEl.textContent = 'Simulation complete!';
-                startBtn.disabled = false;
-                startBtn.textContent = 'Restart';
+                startBtn.textContent = 'Restart Simulation';
+                startBtn.style.background = '';
             }
         };
 
         ws.onerror = () => {
+            activeWs = null;
             statusEl.textContent = 'Connection error';
-            startBtn.disabled = false;
+            startBtn.textContent = 'Start Simulation';
+            startBtn.style.background = '';
         };
 
         ws.onclose = () => {
+            activeWs = null;
             if (statusEl.textContent.includes('Streaming')) {
-                statusEl.textContent = 'Connection closed';
-                startBtn.disabled = false;
+                statusEl.textContent = 'Stopped';
+                startBtn.textContent = 'Start Simulation';
+                startBtn.style.background = '';
             }
         };
     });
